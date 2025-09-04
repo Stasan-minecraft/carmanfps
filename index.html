@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FPS Benchmark — Маятник (авто-спавн, ≈FPS)</title>
+  <style>
+    :root { --bg:#0b0f14; --text:#e6f1ff; --accent:#4dd0e1; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:radial-gradient(1200px 800px at 70% 20%, #111a24 0%, var(--bg) 60%);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,"Helvetica Neue",Arial;overflow:hidden}
+    #scene{display:block;width:100%;height:100%}
+
+    .hud{position:fixed;left:10px;top:10px;z-index:10;display:grid;gap:6px}
+    .panel{backdrop-filter:blur(10px) saturate(120%);background:rgba(20,26,33,.78);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:8px 10px}
+    .kpis{display:flex;align-items:baseline;gap:8px;font-variant-numeric:tabular-nums}
+    .fps{font-weight:800;font-size:22px}
+    #spark{display:block;width:260px;height:38px}
+    .count{font-size:12px;opacity:.9}
+
+    #banner{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:20}
+    #banner .box{padding:24px 28px;border-radius:16px;background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.2);box-shadow:0 10px 40px rgba(0,0,0,.55);text-align:center}
+    #banner h1{margin:0 0 6px 0;font-size:28px}
+    #banner p{margin:0;opacity:.95}
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div class="hud">
+    <div class="panel">
+      <div class="kpis">FPS: <span class="fps" id="fpsNow">≈ 0</span></div>
+      <canvas id="spark" width="260" height="38"></canvas>
+      <div class="count">Маятників: <span id="count">0</span></div>
+    </div>
+  </div>
+
+  <div id="banner">
+    <div class="box">
+      <h1>0 FPS</h1>
+      <p>Зависло на <strong id="finalCount">0</strong> маятниках.</p>
+      <p style="margin-top:8px;font-size:12px;opacity:.8">Перезавантажте сторінку, щоб запустити заново.</p>
+    </div>
+  </div>
+
+<script>
+"use strict";
+(()=>{
+  // Canvas
+  const dpr=Math.max(1,Math.min(3,window.devicePixelRatio||1));
+  const cvs=document.getElementById('scene');
+  const ctx=cvs.getContext('2d',{alpha:false,desynchronized:true});
+  function resize(){const w=Math.floor(window.innerWidth*dpr),h=Math.floor(window.innerHeight*dpr);cvs.width=w;cvs.height=h;cvs.style.width='100%';cvs.style.height='100%';ctx.setTransform(1,0,0,1,0,0);ctx.scale(dpr,dpr);} resize(); window.addEventListener('resize',resize);
+
+  // HUD
+  const elFps=document.getElementById('fpsNow');
+  const elCount=document.getElementById('count');
+  const spark=document.getElementById('spark');
+  const sctx=spark.getContext('2d');
+  const banner=document.getElementById('banner');
+  const finalCount=document.getElementById('finalCount');
+
+  // State
+  const state={objects:[],running:true,lastTime:performance.now(),lastFrameMark:performance.now(),fpsSamples:[],spawnTimer:null,stalled:false};
+
+  // PRNG
+  function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}}; const rng=mulberry32(1337);
+
+  // Model
+  function makePendulum(){const W=window.innerWidth,H=window.innerHeight;const L=40+Math.floor(rng()*140);const A=(10+rng()*15)*Math.PI/180;const phase=rng()*Math.PI*2;const ox=rng()*(W-40)+20;const oy=rng()*(H*0.6)+40;const color=`hsl(${Math.floor(rng()*360)} 70% 60%)`;return{ox,oy,L,A,phase,color};}
+
+  // Render
+  function step(dt){const W=window.innerWidth,H=window.innerHeight;ctx.clearRect(0,0,W,H);const t=performance.now()/1000;ctx.lineWidth=1.1;ctx.strokeStyle='rgba(255,255,255,0.28)';for(let i=0;i<state.objects.length;i++){const o=state.objects[i];const omega=Math.sqrt(9.81/(o.L/100));const angle=o.A*Math.sin(omega*t+o.phase);const x=o.ox+Math.sin(angle)*o.L;const y=o.oy+Math.cos(angle)*o.L;ctx.beginPath();ctx.moveTo(o.ox,o.oy);ctx.lineTo(x,y);ctx.stroke();ctx.fillStyle=o.color;ctx.fillRect((x-2)|0,(y-2)|0,4,4);}}
+
+  // FPS
+  function approxFPS(x){ if(!isFinite(x)||x<=0) return 0; return Math.max(0, Math.floor(x/10)*10); } // «приблизно»: донизу до десятків
+  function updateFps(dt){ const fps=dt>0?1/dt:0; state.fpsSamples.push(fps); if(state.fpsSamples.length>180) state.fpsSamples.shift(); elFps.textContent='≈ '+approxFPS(fps); drawSpark(); state.lastFrameMark=performance.now(); }
+  function drawSpark(){ const W=spark.width,H=spark.height; sctx.clearRect(0,0,W,H); const arr=state.fpsSamples; if(!arr.length) return; const maxF=Math.max(30,Math.max(...arr)); sctx.strokeStyle='rgba(255,255,255,0.12)'; sctx.lineWidth=1; sctx.beginPath(); for(let y=0;y<=H;y+=12){ sctx.moveTo(0,y+0.5); sctx.lineTo(W,y+0.5);} sctx.stroke(); sctx.strokeStyle='#4dd0e1'; sctx.beginPath(); for(let i=0;i<arr.length;i++){ const x=i/(arr.length-1)*W; const y=H-(arr[i]/maxF)*(H-2)-1; if(i===0) sctx.moveTo(x,y); else sctx.lineTo(x,y);} sctx.stroke(); }
+
+  // Loop + watchdog
+  function loop(){ const now=performance.now(); const dt=Math.min(0.5,(now-state.lastTime)/1000); state.lastTime=now; if(state.running){ step(dt); updateFps(dt);} if(!state.stalled) requestAnimationFrame(loop); }
+
+  // Auto spawn: +1000/сек
+  function spawnMany(n){ for(let i=0;i<n;i++) state.objects.push(makePendulum()); elCount.textContent=state.objects.length; }
+  state.spawnTimer=setInterval(()=>{ if(!state.stalled) spawnMany(1000); },1000);
+
+  // Detect 0 FPS (no frames >1.5s)
+  setInterval(()=>{ if(state.stalled) return; const gap=performance.now()-state.lastFrameMark; if(gap>1500) goStalled(); }, 400);
+  function goStalled(){ state.stalled=true; state.running=false; try{ clearInterval(state.spawnTimer);}catch{} finalCount.textContent=String(state.objects.length); elFps.textContent='≈ 0'; banner.style.display='flex'; }
+
+  // Start
+  loop();
+})();
+</script>
+</body>
+</html>
